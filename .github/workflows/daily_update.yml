@@ -1,0 +1,43 @@
+name: Daily Market Indicators
+
+on:
+  schedule:
+    # 每天 UTC 22:00 (美东时间下午 5:00 或 6:00) 运行
+    - cron: '0 22 * * 1-5' 
+  workflow_dispatch: # 允许手动点按钮触发测试
+
+permissions:
+  contents: write # 需要写权限来提交生成的 index.html
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Run Analysis Script
+      env:
+        # 这里引用你在 GitHub Secrets 里设置的变量
+        TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+        TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: python main.py
+
+    - name: Commit and Push changes
+      run: |
+        git config --global user.name 'GitHub Action Bot'
+        git config --global user.email 'action@github.com'
+        # 强制添加 index.html，如果没变化 git commit 会跳过
+        git add index.html
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Update charts $(date +'%Y-%m-%d')" && git push)
