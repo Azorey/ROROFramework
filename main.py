@@ -7,62 +7,79 @@ import os
 from datetime import datetime
 
 # =================配置区域=================
-# 这里是为了未来的灵活性设计的。
-# 如果你想加新指标，只需在这个列表中添加字典即可。
 INDICATORS = [
     {
         "name": "消费周期风向标 (XLY/XLP)",
-        "numerator": "XLY",   # 分子：非必需消费品
-        "denominator": "XLP", # 分母：必需消费品
+        "numerator": "XLY",
+        "denominator": "XLP",
         "description": "上升代表风险偏好增强 (Risk On)，下降代表防御心态 (Risk Off)"
     },
-    # 未来可以取消注释添加如下指标：
-    # {
-    #     "name": "科技 vs 宽基 (QQQ/SPY)",
-    #     "numerator": "QQQ",
-    #     "denominator": "SPY",
-    #     "description": "衡量科技股相对于大盘的强弱"
-    # }
+    # 你可以在这里继续添加其他指标，例如 QQQ/SPY
 ]
 
-# Telegram 配置 (从环境变量读取，为了安全)
+# Telegram 配置
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
+
+# 配色方案 (对应 PineScript)
+COLORS = {
+    'ema20': 'gray',
+    'sma20': '#D3D3D3', # Light Gray
+    'ema60': 'red',
+    'sma60': '#FDBCB4', # Light Red
+    'ema120': 'blue',
+    'sma120': '#ADD8E6', # Light Blue
+    'dkj': '#FFC40C'     # Gold (抵扣价标记)
+}
 # =========================================
 
 def get_data_and_calculate(indicators):
-    """下载数据并计算比率"""
+    """下载数据并计算比率及均线系统"""
     results = []
     
-    # 收集所有需要下载的 Ticker 以便一次性下载（减少请求次数）
+    # 收集 Ticker
     tickers = set()
     for item in indicators:
         tickers.add(item['numerator'])
         tickers.add(item['denominator'])
     
     print(f"正在下载数据: {tickers} ...")
-    # 下载过去 2 年的数据，足以判断中短期趋势
+    # 下载 3 年数据，确保 120 日均线有足够的数据计算
     try:
-        data = yf.download(list(tickers), period="2y", auto_adjust=True)['Close']
+        data = yf.download(list(tickers), period="3y", auto_adjust=True)['Close']
     except Exception as e:
         print(f"数据下载失败: {e}")
         return []
 
     for item in indicators:
         try:
-            # 计算比率
-            ratio_series = data[item['numerator']] / data[item['denominator']]
+            # 1. 计算基础比率 (Close / Close)
+            # 注意：合成指标通常没有 High/Low 概念，我们基于收盘价计算比率
+            ratio = data[item['numerator']] / data[item['denominator']]
             
-            # 计算简单的 20日和 50日 均线作为辅助参考
-            sma20 = ratio_series.rolling(window=20).mean()
+            # 创建 DataFrame 用于存储所有指标
+            df = pd.DataFrame({'close': ratio})
+            
+            # 2. 计算 SMA (Simple Moving Average)
+            df['sma20'] = df['close'].rolling(window=20).mean()
+            df['sma60'] = df['close'].rolling(window=60).mean()
+            df['sma120'] = df['close'].rolling(window=120).mean()
+            
+            # 3. 计算 EMA (Exponential Moving Average)
+            # pandas ewm span=N 对应 PineScript ta.ema(N)
+            df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+            df['ema60'] = df['close'].ewm(span=60, adjust=False).mean()
+            df['ema120'] = df['close'].ewm(span=120, adjust=False).mean()
+
+            # 4. 获取抵扣价 (Lookback Data)
+            # 为了在图上画圈，我们需要找到 T-20, T-60, T-120 的位置
+            # 使用 shift 来获取历史数据，或者直接在绘图时按索引提取
             
             results.append({
                 "meta": item,
-                "data": ratio_series,
-                "sma20": sma20,
-                "latest_value": ratio_series.iloc[-1],
-                "prev_value": ratio_series.iloc[-2],
-                "latest_date": ratio_series.index[-1].strftime('%Y-%m-%d')
+                "df": df, # 包含所有计算结果的 DataFrame
+                "latest_value": df['close'].iloc[-1],
+                "prev_value": df['close'].iloc[-2]
             })
         except KeyError as e:
             print(f"计算 {item['name']} 失败，可能是数据缺失: {e}")
@@ -70,8 +87,7 @@ def get_data_and_calculate(indicators):
     return results
 
 def generate_plot(results):
-    """生成交互式 HTML 图表"""
-    # 创建子图，如果有多个指标，会垂直排列
+    """生成包含完整均线系统和 DKJ 标记的图表"""
     fig = make_subplots(
         rows=len(results), cols=1,
         subplot_titles=[item['meta']['name'] for item in results],
@@ -80,27 +96,71 @@ def generate_plot(results):
 
     for idx, res in enumerate(results):
         row = idx + 1
-        # 添加比率线
+        df = res['df']
+        
+        # --- 1. 绘制 K线/收盘线 (比率本身) ---
         fig.add_trace(
-            go.Scatter(x=res['data'].index, y=res['data'], name=f"{res['meta']['name']} Ratio",
-                       line=dict(color='blue', width=2)),
-            row=row, col=1
-        )
-        # 添加 SMA20 辅助线
-        fig.add_trace(
-            go.Scatter(x=res['sma20'].index, y=res['sma20'], name="SMA 20",
-                       line=dict(color='orange', width=1, dash='dash')),
+            go.Scatter(x=df.index, y=df['close'], name="Ratio (Close)",
+                       line=dict(color='black', width=1.5), opacity=0.6),
             row=row, col=1
         )
 
+        # --- 2. 绘制均线系统 (EMA 在前，SMA 在后) ---
+        # 20周期
+        fig.add_trace(go.Scatter(x=df.index, y=df['sma20'], name="SMA 20", line=dict(color=COLORS['sma20'], width=1.5)), row=row, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], name="EMA 20", line=dict(color=COLORS['ema20'], width=1.5)), row=row, col=1)
+        
+        # 60周期
+        fig.add_trace(go.Scatter(x=df.index, y=df['sma60'], name="SMA 60", line=dict(color=COLORS['sma60'], width=1.5)), row=row, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['ema60'], name="EMA 60", line=dict(color=COLORS['ema60'], width=1.5)), row=row, col=1)
+        
+        # 120周期
+        fig.add_trace(go.Scatter(x=df.index, y=df['sma120'], name="SMA 120", line=dict(color=COLORS['sma120'], width=1.5)), row=row, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['ema120'], name="EMA 120", line=dict(color=COLORS['ema120'], width=1.5)), row=row, col=1)
+
+        # --- 3. 绘制 DKJ 抵扣价标记 (Circles) ---
+        # 逻辑：找到当前日期往前推 20/60/120 天的数据点
+        lookbacks = [20, 60, 120]
+        
+        # 收集要打点的 x (时间) 和 y (数值)
+        dkj_x = []
+        dkj_y = []
+        dkj_text = []
+
+        curr_idx = len(df) - 1
+        
+        for lb in lookbacks:
+            target_idx = curr_idx - lb
+            if target_idx >= 0:
+                # 获取该位置的时间和数值
+                point_time = df.index[target_idx]
+                point_val = df['close'].iloc[target_idx]
+                
+                dkj_x.append(point_time)
+                dkj_y.append(point_val)
+                dkj_text.append(f"T-{lb} (抵扣价)")
+
+        if dkj_x:
+            fig.add_trace(
+                go.Scatter(
+                    x=dkj_x, 
+                    y=dkj_y,
+                    mode='markers',
+                    name="DKJ (抵扣价)",
+                    marker=dict(color=COLORS['dkj'], size=10, symbol='circle', line=dict(width=2, color='black')),
+                    text=dkj_text,
+                    hovertemplate="%{text}<br>Value: %{y:.4f}<extra></extra>"
+                ),
+                row=row, col=1
+            )
+
     fig.update_layout(
-        title_text=f"市场情绪监控看板 (生成于 {datetime.now().strftime('%Y-%m-%d')})",
-        height=400 * len(results), # 根据图表数量动态调整高度
-        showlegend=True,
-        template="plotly_white"
+        title_text=f"量化交易辅助面板 (生成于 {datetime.now().strftime('%Y-%m-%d')})",
+        height=600 * len(results), # 增加高度以便看清细节
+        template="plotly_white",
+        hovermode="x unified" # 鼠标悬停时显示该时间点所有指标的值
     )
     
-    # 保存为 HTML 文件
     fig.write_html("index.html")
     print("图表已生成: index.html")
 
@@ -110,36 +170,42 @@ def send_telegram_alert(results):
         print("未配置 Telegram Token，跳过发送。")
         return
 
-    # 获取 GitHub Pages 链接 (假设你的仓库名格式正确)
     repo_name = os.environ.get("GITHUB_REPOSITORY", "your_repo")
-    page_url = f"https://{repo_name.split('/')[0]}.github.io/{repo_name.split('/')[1]}/"
+    # 处理 Github Pages URL，通常是 https://username.github.io/repo_name/
+    if "/" in repo_name:
+        username, repo = repo_name.split("/")
+        page_url = f"https://{username}.github.io/{repo}/"
+    else:
+        page_url = "Check Repo"
 
-    message_lines = [f"📅 **{datetime.now().strftime('%Y-%m-%d')} 交易员日报**\n"]
+    message_lines = [f"📅 **{datetime.now().strftime('%Y-%m-%d')} 市场信号**\n"]
     
     for res in results:
+        df = res['df']
         name = res['meta']['name']
-        val = res['latest_value']
-        prev = res['prev_value']
-        change = (val - prev) / prev * 100
-        icon = "⬆️" if change > 0 else "⬇️"
+        curr = res['latest_value']
+        
+        # 简单的趋势判断：当前价格 vs EMA20
+        ema20 = df['ema20'].iloc[-1]
+        trend = "看多 🐂" if curr > ema20 else "看空 🐻"
         
         message_lines.append(f"📊 **{name}**")
-        message_lines.append(f"当前值: {val:.4f} ({icon} {change:.2f}%)")
-        message_lines.append(f"_{res['meta']['description']}_\n")
+        message_lines.append(f"现值: `{curr:.4f}`")
+        message_lines.append(f"EMA20: `{ema20:.4f}` ({trend})")
+        message_lines.append(f"DKJ位置: T-20, T-60 已在图中标注")
+        message_lines.append("---")
 
-    message_lines.append(f"🔗 [查看交互式图表]({page_url})")
+    message_lines.append(f"🔗 [点击查看完整交互图表]({page_url})")
     
     msg = "\n".join(message_lines)
     
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TG_CHAT_ID,
-        "text": msg,
-        "parse_mode": "Markdown"
-    }
+    payload = {"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown"}
     
-    resp = requests.post(url, json=payload)
-    print(f"Telegram 推送结果: {resp.status_code}")
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"Telegram 推送错误: {e}")
 
 def main():
     results = get_data_and_calculate(INDICATORS)
@@ -147,7 +213,7 @@ def main():
         generate_plot(results)
         send_telegram_alert(results)
     else:
-        print("无数据生成，流程结束。")
+        print("无数据生成。")
 
 if __name__ == "__main__":
     main()
