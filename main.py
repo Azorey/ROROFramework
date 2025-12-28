@@ -18,13 +18,24 @@ INDICATORS = [
     }
 ]
 
+# 2. 板块配置 (增加 Emoji 分类)
+# ⚔️ = 进攻/周期型 (Risk On)
+# 🛡️ = 防御型 (Risk Off)
+# 🛢️ = 能源/抗通胀 (特殊)
 SECTOR_CONFIG = {
     'BENCHMARK': 'SPY',
     'SECTORS': {
-        'XLK': '科技', 'XLY': '非必需消费', 'XLC': '通讯',
-        'XLV': '医疗', 'XLP': '必需消费', 'XLE': '能源',
-        'XLF': '金融', 'XLI': '工业', 'XLB': '材料',
-        'XLU': '公用', 'XLRE': '地产'
+        'XLK':  '⚔️ 科技', 
+        'XLY':  '⚔️ 非必需消费', 
+        'XLC':  '⚔️ 通讯',
+        'XLF':  '⚔️ 金融', 
+        'XLI':  '⚔️ 工业', 
+        'XLB':  '⚔️ 材料',
+        'XLRE': '⚔️ 地产',
+        'XLP':  '🛡️ 必需消费', 
+        'XLV':  '🛡️ 医疗', 
+        'XLU':  '🛡️ 公用', 
+        'XLE':  '🛢️ 能源',
     }
 }
 
@@ -87,8 +98,11 @@ def calculate_rrg_components(df_close):
         mom_ma = r_ratio.rolling(window=window_mom).mean()
         r_mom = 100 * (r_ratio / mom_ma)
         
+        # 使用配置中的带 Emoji 的名字
+        display_name = f"{sec} {SECTOR_CONFIG['SECTORS'][sec]}"
+
         rrg_data[sec] = {
-            'name': SECTOR_CONFIG['SECTORS'][sec],
+            'display_name': display_name, 
             'x': r_ratio.tail(5).values,
             'y': r_mom.tail(5).values,
             'current_x': r_ratio.iloc[-1],
@@ -118,13 +132,11 @@ def get_quadrant_color(x, y):
     return COLORS['weakening']
 
 def generate_dashboard(rrg_data, indicator_results):
-    """生成仪表盘 (含视觉修正)"""
+    """生成仪表盘"""
     
-    # 计算行数，RRG 占第一行
     rows = 1 + len(indicator_results)
-    
-    # 调整高度：RRG 给大一点的正方形空间
-    row_heights = [0.6] + [0.4/len(indicator_results)] * len(indicator_results) if indicator_results else [1.0]
+    # RRG 图高度占比稍微调大
+    row_heights = [0.55] + [0.45/len(indicator_results)] * len(indicator_results) if indicator_results else [1.0]
 
     fig = make_subplots(
         rows=rows, cols=1,
@@ -133,35 +145,64 @@ def generate_dashboard(rrg_data, indicator_results):
         vertical_spacing=0.1
     )
 
-    # --- 1. RRG 雷达图绘制 ---
+    # --- 1. RRG 雷达图绘制 (Row 1) ---
+
+    # 【改进点 1】 使用 add_shape 绘制强行穿越的象限线
+    # 使用 xref='x domain' 可以让线横跨整个图表宽度，不受数据范围限制
+    # 绘制水平线 y=100
+    fig.add_shape(
+        type="line",
+        x0=0, x1=1, xref="x domain", # 从左边界到右边界
+        y0=100, y1=100, yref="y",    # 锁定在 Y=100
+        line=dict(color="black", width=2, dash="solid"),
+        layer="below", row=1, col=1
+    )
+    # 绘制垂直线 x=100
+    fig.add_shape(
+        type="line",
+        x0=100, x1=100, xref="x",    # 锁定在 X=100
+        y0=0, y1=1, yref="y domain", # 从下边界到上边界
+        line=dict(color="black", width=2, dash="solid"),
+        layer="below", row=1, col=1
+    )
     
-    # 【修正2】 加粗分界线
-    # 使用实线 (solid) 或 长虚线 (longdash)，宽度设为 3，颜色纯黑
-    fig.add_hline(y=100, line_dash="solid", line_color="black", line_width=2, opacity=0.8, row=1, col=1)
-    fig.add_vline(x=100, line_dash="solid", line_color="black", line_width=2, opacity=0.8, row=1, col=1)
+    # 【改进点 2】 使用 Domain (0-1) 坐标定位角落文字，防止跑偏
+    # xanchor/yanchor 确保文字是往里缩的，不会贴边切掉
+    annotations = [
+        # 右上：领先
+        dict(x=0.98, y=0.98, text="领先 (Leading)", font=dict(color="green", size=16, weight="bold"), xanchor="right", yanchor="top"),
+        # 左上：改善
+        dict(x=0.02, y=0.98, text="改善 (Improving)", font=dict(color="blue", size=16, weight="bold"), xanchor="left", yanchor="top"),
+        # 左下：落后
+        dict(x=0.02, y=0.02, text="落后 (Lagging)", font=dict(color="red", size=16, weight="bold"), xanchor="left", yanchor="bottom"),
+        # 右下：衰退
+        dict(x=0.98, y=0.02, text="衰退 (Weakening)", font=dict(color="orange", size=16, weight="bold"), xanchor="right", yanchor="bottom"),
+    ]
     
-    # 标注文字
-    fig.add_annotation(x=104, y=104, text="领先", showarrow=False, font=dict(color="green", size=16, weight="bold"), row=1, col=1)
-    fig.add_annotation(x=96, y=104, text="改善", showarrow=False, font=dict(color="blue", size=16, weight="bold"), row=1, col=1)
-    fig.add_annotation(x=96, y=96, text="落后", showarrow=False, font=dict(color="red", size=16, weight="bold"), row=1, col=1)
-    fig.add_annotation(x=104, y=96, text="衰退", showarrow=False, font=dict(color="orange", size=16, weight="bold"), row=1, col=1)
+    for ann in annotations:
+        fig.add_annotation(
+            xref="x domain", yref="y domain", # 关键：使用相对坐标系
+            row=1, col=1,
+            showarrow=False,
+            **ann
+        )
 
     for sec, data in rrg_data.items():
-        # 轨迹线
+        # 轨迹
         fig.add_trace(
             go.Scatter(x=data['x'], y=data['y'], mode='lines', line=dict(color='gray', width=1), opacity=0.5, showlegend=False, hoverinfo='skip'),
             row=1, col=1
         )
-        # 当前点
+        # 当前点 (使用带 Emoji 的 display_name)
         color = get_quadrant_color(data['current_x'], data['current_y'])
         fig.add_trace(
             go.Scatter(
                 x=[data['current_x']], y=[data['current_y']],
                 mode='markers+text',
-                name=sec,
+                name=data['display_name'], # 这里的名字会显示在 Legend
                 text=sec, textposition="top center",
                 marker=dict(size=14, color=color, line=dict(width=1, color='black')),
-                hovertemplate=f"<b>{data['name']}</b><br>RS: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"
+                hovertemplate=f"<b>{data['display_name']}</b><br>RS: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"
             ), row=1, col=1
         )
 
@@ -169,13 +210,11 @@ def generate_dashboard(rrg_data, indicator_results):
     for idx, res in enumerate(indicator_results):
         row = idx + 2
         df = res['df']
-        # K线
         fig.add_trace(go.Scatter(x=df.index, y=df['close'], name="Ratio", line=dict(color='black', width=1.5), opacity=0.6), row=row, col=1)
-        # 均线
         for w in [20, 60, 120]:
             fig.add_trace(go.Scatter(x=df.index, y=df[f'sma{w}'], name=f"SMA{w}", line=dict(color=COLORS[f'sma{w}'], width=1)), row=row, col=1)
             fig.add_trace(go.Scatter(x=df.index, y=df[f'ema{w}'], name=f"EMA{w}", line=dict(color=COLORS[f'ema{w}'], width=1)), row=row, col=1)
-        # DKJ
+        
         curr_idx = len(df) - 1
         dkj_x, dkj_y = [], []
         for lb in [20, 60, 120]:
@@ -186,23 +225,18 @@ def generate_dashboard(rrg_data, indicator_results):
         if dkj_x:
             fig.add_trace(go.Scatter(x=dkj_x, y=dkj_y, mode='markers', name="DKJ", marker=dict(color=COLORS['dkj'], size=8)), row=row, col=1)
 
-    # --- 全局 Layout 修正 ---
+    # --- Layout ---
     fig.update_layout(
         title_text=f"量化交易员看板 ({datetime.now().strftime('%Y-%m-%d')})",
-        # 【重要】锁定总宽度，防止带鱼屏拉伸过长
         width=1000, 
         height=800 + 300 * len(indicator_results),
         template="plotly_white",
         showlegend=True
     )
 
-    # 【修正1】 强制 RRG 区域 (Row 1) 为正方形比例 (1 unit x = 1 unit y)
-    fig.update_yaxes(
-        scaleanchor="x",
-        scaleratio=1,
-        row=1, col=1
-    )
-    # 为 RRG 设置合理的 Range padding，避免点贴在边框上
+    # 保持正方形比例
+    fig.update_yaxes(scaleanchor="x", scaleratio=1, row=1, col=1)
+    # 增加一点 Padding 确保边缘的点不被切掉
     fig.update_xaxes(constrain='domain', row=1, col=1)
     
     fig.write_html("index.html")
@@ -211,15 +245,16 @@ def generate_dashboard(rrg_data, indicator_results):
 def send_telegram(rrg_data, indicator_results):
     if not TG_BOT_TOKEN or not TG_CHAT_ID: return
 
-    leading = [d['name'] for d in rrg_data.values() if d['current_x']>100 and d['current_y']>100]
-    improving = [d['name'] for d in rrg_data.values() if d['current_x']<100 and d['current_y']>100]
+    # 使用带 Emoji 的名字
+    leading = [d['display_name'] for d in rrg_data.values() if d['current_x']>100 and d['current_y']>100]
+    improving = [d['display_name'] for d in rrg_data.values() if d['current_x']<100 and d['current_y']>100]
     
     repo = os.environ.get("GITHUB_REPOSITORY", "repo")
     url = f"https://{repo.split('/')[0]}.github.io/{repo.split('/')[1]}/" if "/" in repo else "http://github.com"
     
     lines = [f"🚀 **{datetime.now().strftime('%Y-%m-%d')} 市场雷达**\n"]
-    if leading: lines.append(f"🔥 **领涨:** {', '.join(leading)}")
-    if improving: lines.append(f"📈 **蓄势:** {', '.join(improving)}")
+    if leading: lines.append(f"🔥 **强势领涨:**\n" + "  " + "\n  ".join(leading))
+    if improving: lines.append(f"📈 **蓄势待发:**\n" + "  " + "\n  ".join(improving))
     lines.append("\n" + "-"*15)
     
     for res in indicator_results:
