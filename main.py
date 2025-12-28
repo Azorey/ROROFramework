@@ -101,7 +101,7 @@ def generate_plot(results):
         # --- 1. 绘制 K线/收盘线 (比率本身) ---
         fig.add_trace(
             go.Scatter(x=df.index, y=df['close'], name="Ratio (Close)",
-                       line=dict(color='#FFA500', width=2), opacity=0.8),
+                       line=dict(color='#FFB000', width=2), opacity=0.8),
             row=row, col=1
         )
 
