@@ -18,10 +18,8 @@ INDICATORS = [
     }
 ]
 
-# 2. 板块配置 (增加 Emoji 分类)
-# ⚔️ = 进攻/周期型 (Risk On)
-# 🛡️ = 防御型 (Risk Off)
-# 🛢️ = 能源/抗通胀 (特殊)
+# 2. 板块配置
+# 格式：Ticker: "Emoji 中文名"
 SECTOR_CONFIG = {
     'BENCHMARK': 'SPY',
     'SECTORS': {
@@ -98,11 +96,20 @@ def calculate_rrg_components(df_close):
         mom_ma = r_ratio.rolling(window=window_mom).mean()
         r_mom = 100 * (r_ratio / mom_ma)
         
-        # 使用配置中的带 Emoji 的名字
-        display_name = f"{sec} {SECTOR_CONFIG['SECTORS'][sec]}"
+        # --- 标签处理逻辑 (新) ---
+        config_val = SECTOR_CONFIG['SECTORS'][sec]
+        # 提取 Emoji (假设格式为 "Emoji Name")
+        emoji = config_val.split(' ')[0] if ' ' in config_val else ''
+        
+        # 1. 图表上的短标签: "⚔️ XLK"
+        chart_label = f"{emoji} {sec}"
+        
+        # 2. Legend/Hover 的完整标签: "XLK ⚔️ 科技"
+        display_name = f"{sec} {config_val}"
 
         rrg_data[sec] = {
-            'display_name': display_name, 
+            'chart_label': chart_label,   # 用于图表直接显示
+            'display_name': display_name, # 用于图例
             'x': r_ratio.tail(5).values,
             'y': r_mom.tail(5).values,
             'current_x': r_ratio.iloc[-1],
@@ -135,7 +142,6 @@ def generate_dashboard(rrg_data, indicator_results):
     """生成仪表盘"""
     
     rows = 1 + len(indicator_results)
-    # RRG 图高度占比稍微调大
     row_heights = [0.55] + [0.45/len(indicator_results)] * len(indicator_results) if indicator_results else [1.0]
 
     fig = make_subplots(
@@ -147,45 +153,25 @@ def generate_dashboard(rrg_data, indicator_results):
 
     # --- 1. RRG 雷达图绘制 (Row 1) ---
 
-    # 【改进点 1】 使用 add_shape 绘制强行穿越的象限线
-    # 使用 xref='x domain' 可以让线横跨整个图表宽度，不受数据范围限制
-    # 绘制水平线 y=100
+    # 象限分界线
     fig.add_shape(
-        type="line",
-        x0=0, x1=1, xref="x domain", # 从左边界到右边界
-        y0=100, y1=100, yref="y",    # 锁定在 Y=100
-        line=dict(color="black", width=2, dash="solid"),
-        layer="below", row=1, col=1
+        type="line", x0=0, x1=1, xref="x domain", y0=100, y1=100, yref="y",
+        line=dict(color="black", width=2, dash="solid"), layer="below", row=1, col=1
     )
-    # 绘制垂直线 x=100
     fig.add_shape(
-        type="line",
-        x0=100, x1=100, xref="x",    # 锁定在 X=100
-        y0=0, y1=1, yref="y domain", # 从下边界到上边界
-        line=dict(color="black", width=2, dash="solid"),
-        layer="below", row=1, col=1
+        type="line", x0=100, x1=100, xref="x", y0=0, y1=1, yref="y domain",
+        line=dict(color="black", width=2, dash="solid"), layer="below", row=1, col=1
     )
     
-    # 【改进点 2】 使用 Domain (0-1) 坐标定位角落文字，防止跑偏
-    # xanchor/yanchor 确保文字是往里缩的，不会贴边切掉
+    # 象限标注
     annotations = [
-        # 右上：领先
         dict(x=0.98, y=0.98, text="领先 (Leading)", font=dict(color="green", size=16, weight="bold"), xanchor="right", yanchor="top"),
-        # 左上：改善
         dict(x=0.02, y=0.98, text="改善 (Improving)", font=dict(color="blue", size=16, weight="bold"), xanchor="left", yanchor="top"),
-        # 左下：落后
         dict(x=0.02, y=0.02, text="落后 (Lagging)", font=dict(color="red", size=16, weight="bold"), xanchor="left", yanchor="bottom"),
-        # 右下：衰退
         dict(x=0.98, y=0.02, text="衰退 (Weakening)", font=dict(color="orange", size=16, weight="bold"), xanchor="right", yanchor="bottom"),
     ]
-    
     for ann in annotations:
-        fig.add_annotation(
-            xref="x domain", yref="y domain", # 关键：使用相对坐标系
-            row=1, col=1,
-            showarrow=False,
-            **ann
-        )
+        fig.add_annotation(xref="x domain", yref="y domain", row=1, col=1, showarrow=False, **ann)
 
     for sec, data in rrg_data.items():
         # 轨迹
@@ -193,14 +179,15 @@ def generate_dashboard(rrg_data, indicator_results):
             go.Scatter(x=data['x'], y=data['y'], mode='lines', line=dict(color='gray', width=1), opacity=0.5, showlegend=False, hoverinfo='skip'),
             row=1, col=1
         )
-        # 当前点 (使用带 Emoji 的 display_name)
+        # 当前点
         color = get_quadrant_color(data['current_x'], data['current_y'])
         fig.add_trace(
             go.Scatter(
                 x=[data['current_x']], y=[data['current_y']],
                 mode='markers+text',
-                name=data['display_name'], # 这里的名字会显示在 Legend
-                text=sec, textposition="top center",
+                name=data['display_name'], # Legend 显示完整名称
+                text=data['chart_label'],  # 【关键修改】图表显示 Emoji + Ticker
+                textposition="top center",
                 marker=dict(size=14, color=color, line=dict(width=1, color='black')),
                 hovertemplate=f"<b>{data['display_name']}</b><br>RS: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"
             ), row=1, col=1
@@ -234,9 +221,7 @@ def generate_dashboard(rrg_data, indicator_results):
         showlegend=True
     )
 
-    # 保持正方形比例
     fig.update_yaxes(scaleanchor="x", scaleratio=1, row=1, col=1)
-    # 增加一点 Padding 确保边缘的点不被切掉
     fig.update_xaxes(constrain='domain', row=1, col=1)
     
     fig.write_html("index.html")
@@ -245,7 +230,7 @@ def generate_dashboard(rrg_data, indicator_results):
 def send_telegram(rrg_data, indicator_results):
     if not TG_BOT_TOKEN or not TG_CHAT_ID: return
 
-    # 使用带 Emoji 的名字
+    # 使用 display_name (含中文) 发送通知
     leading = [d['display_name'] for d in rrg_data.values() if d['current_x']>100 and d['current_y']>100]
     improving = [d['display_name'] for d in rrg_data.values() if d['current_x']<100 and d['current_y']>100]
     
