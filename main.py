@@ -19,7 +19,6 @@ INDICATORS = [
 ]
 
 # 2. 板块配置
-# 格式：Ticker: "Emoji 中文名"
 SECTOR_CONFIG = {
     'BENCHMARK': 'SPY',
     'SECTORS': {
@@ -88,28 +87,19 @@ def calculate_rrg_components(df_close):
             continue
             
         rs_raw = df_close[sec] / df_close[benchmark]
-        
-        # 归一化计算
         rs_ma = rs_raw.rolling(window=window_rs).mean()
         r_ratio = 100 * (rs_raw / rs_ma)
-        
         mom_ma = r_ratio.rolling(window=window_mom).mean()
         r_mom = 100 * (r_ratio / mom_ma)
         
-        # --- 标签处理逻辑 (新) ---
         config_val = SECTOR_CONFIG['SECTORS'][sec]
-        # 提取 Emoji (假设格式为 "Emoji Name")
         emoji = config_val.split(' ')[0] if ' ' in config_val else ''
-        
-        # 1. 图表上的短标签: "⚔️ XLK"
         chart_label = f"{emoji} {sec}"
-        
-        # 2. Legend/Hover 的完整标签: "XLK ⚔️ 科技"
         display_name = f"{sec} {config_val}"
 
         rrg_data[sec] = {
-            'chart_label': chart_label,   # 用于图表直接显示
-            'display_name': display_name, # 用于图例
+            'chart_label': chart_label,
+            'display_name': display_name,
             'x': r_ratio.tail(5).values,
             'y': r_mom.tail(5).values,
             'current_x': r_ratio.iloc[-1],
@@ -140,7 +130,6 @@ def get_quadrant_color(x, y):
 
 def generate_dashboard(rrg_data, indicator_results):
     """生成仪表盘"""
-    
     rows = 1 + len(indicator_results)
     row_heights = [0.55] + [0.45/len(indicator_results)] * len(indicator_results) if indicator_results else [1.0]
 
@@ -151,19 +140,10 @@ def generate_dashboard(rrg_data, indicator_results):
         vertical_spacing=0.1
     )
 
-    # --- 1. RRG 雷达图绘制 (Row 1) ---
-
-    # 象限分界线
-    fig.add_shape(
-        type="line", x0=0, x1=1, xref="x domain", y0=100, y1=100, yref="y",
-        line=dict(color="black", width=2, dash="solid"), layer="below", row=1, col=1
-    )
-    fig.add_shape(
-        type="line", x0=100, x1=100, xref="x", y0=0, y1=1, yref="y domain",
-        line=dict(color="black", width=2, dash="solid"), layer="below", row=1, col=1
-    )
+    # RRG
+    fig.add_shape(type="line", x0=0, x1=1, xref="x domain", y0=100, y1=100, yref="y", line=dict(color="black", width=2, dash="solid"), layer="below", row=1, col=1)
+    fig.add_shape(type="line", x0=100, x1=100, xref="x", y0=0, y1=1, yref="y domain", line=dict(color="black", width=2, dash="solid"), layer="below", row=1, col=1)
     
-    # 象限标注
     annotations = [
         dict(x=0.98, y=0.98, text="领先 (Leading)", font=dict(color="green", size=16, weight="bold"), xanchor="right", yanchor="top"),
         dict(x=0.02, y=0.98, text="改善 (Improving)", font=dict(color="blue", size=16, weight="bold"), xanchor="left", yanchor="top"),
@@ -174,26 +154,11 @@ def generate_dashboard(rrg_data, indicator_results):
         fig.add_annotation(xref="x domain", yref="y domain", row=1, col=1, showarrow=False, **ann)
 
     for sec, data in rrg_data.items():
-        # 轨迹
-        fig.add_trace(
-            go.Scatter(x=data['x'], y=data['y'], mode='lines', line=dict(color='gray', width=1), opacity=0.5, showlegend=False, hoverinfo='skip'),
-            row=1, col=1
-        )
-        # 当前点
         color = get_quadrant_color(data['current_x'], data['current_y'])
-        fig.add_trace(
-            go.Scatter(
-                x=[data['current_x']], y=[data['current_y']],
-                mode='markers+text',
-                name=data['display_name'], # Legend 显示完整名称
-                text=data['chart_label'],  # 【关键修改】图表显示 Emoji + Ticker
-                textposition="top center",
-                marker=dict(size=14, color=color, line=dict(width=1, color='black')),
-                hovertemplate=f"<b>{data['display_name']}</b><br>RS: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"
-            ), row=1, col=1
-        )
+        fig.add_trace(go.Scatter(x=data['x'], y=data['y'], mode='lines', line=dict(color='gray', width=1), opacity=0.5, showlegend=False, hoverinfo='skip'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=[data['current_x']], y=[data['current_y']], mode='markers+text', name=data['display_name'], text=data['chart_label'], textposition="top center", marker=dict(size=14, color=color, line=dict(width=1, color='black')), hovertemplate=f"<b>{data['display_name']}</b><br>RS: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"), row=1, col=1)
 
-    # --- 2. 常规指标绘制 ---
+    # Indicators
     for idx, res in enumerate(indicator_results):
         row = idx + 2
         df = res['df']
@@ -212,25 +177,55 @@ def generate_dashboard(rrg_data, indicator_results):
         if dkj_x:
             fig.add_trace(go.Scatter(x=dkj_x, y=dkj_y, mode='markers', name="DKJ", marker=dict(color=COLORS['dkj'], size=8)), row=row, col=1)
 
-    # --- Layout ---
-    fig.update_layout(
-        title_text=f"量化交易员看板 ({datetime.now().strftime('%Y-%m-%d')})",
-        width=1000, 
-        height=800 + 300 * len(indicator_results),
-        template="plotly_white",
-        showlegend=True
-    )
-
+    fig.update_layout(title_text=f"量化交易员看板 ({datetime.now().strftime('%Y-%m-%d')})", width=1000, height=800 + 300 * len(indicator_results), template="plotly_white", showlegend=True)
     fig.update_yaxes(scaleanchor="x", scaleratio=1, row=1, col=1)
     fig.update_xaxes(constrain='domain', row=1, col=1)
-    
     fig.write_html("index.html")
-    print("Dashboard 生成完毕: index.html")
+
+# ================= 新增逻辑: 均线状态描述 =================
+def get_ma_status_text(current_val, row):
+    """
+    分析当前价格与 6 条均线的相对位置，返回描述性文本。
+    """
+    # 提取最后一行均线数据
+    mas = {
+        'SMA20': row['sma20'], 'EMA20': row['ema20'],
+        'SMA60': row['sma60'], 'EMA60': row['ema60'],
+        'SMA120': row['sma120'], 'EMA120': row['ema120']
+    }
+    
+    # 统计有多少条均线在价格下方 (支撑)
+    support_count = sum(1 for v in mas.values() if current_val > v)
+    
+    # 1. 极端情况判断
+    if support_count == 6:
+        return "🚀 **超强多头** (高于所有均线)"
+    if support_count == 0:
+        return "🩸 **极度弱势** (低于所有均线)"
+    
+    # 2. 寻找价格夹在哪些均线中间 (震荡/纠缠)
+    # 将均线按数值从小到大排序
+    sorted_mas = sorted(mas.items(), key=lambda item: item[1])
+    
+    floor_ma = None # 下方最近支撑
+    ceil_ma = None  # 上方最近压力
+    
+    for name, val in sorted_mas:
+        if current_val > val:
+            floor_ma = name # 不断更新，直到找到最后一个比价格小的
+        else:
+            ceil_ma = name  # 找到第一个比价格大的，就是压力位
+            break # 找到后立刻停止
+            
+    # 生成描述: 例如 "SMA20 < 现价 < EMA60"
+    if floor_ma and ceil_ma:
+        return f"⚖️ **震荡** ({floor_ma} < 现价 < {ceil_ma})"
+    
+    return f"⚠️ **均线纠缠** (支撑: {support_count}/6)"
 
 def send_telegram(rrg_data, indicator_results):
     if not TG_BOT_TOKEN or not TG_CHAT_ID: return
 
-    # 使用 display_name (含中文) 发送通知
     leading = [d['display_name'] for d in rrg_data.values() if d['current_x']>100 and d['current_y']>100]
     improving = [d['display_name'] for d in rrg_data.values() if d['current_x']<100 and d['current_y']>100]
     
@@ -243,10 +238,19 @@ def send_telegram(rrg_data, indicator_results):
     lines.append("\n" + "-"*15)
     
     for res in indicator_results:
-        trend = "🐂" if res['latest_value'] > res['df']['ema20'].iloc[-1] else "🐻"
-        lines.append(f"📊 {res['meta']['name']}: `{res['latest_value']:.4f}` {trend}")
+        # 获取最新的 DataFrame 行数据
+        last_row = res['df'].iloc[-1]
+        curr_val = res['latest_value']
+        
+        # 【关键修改】调用新的描述函数
+        status_text = get_ma_status_text(curr_val, last_row)
+        
+        lines.append(f"📊 **{res['meta']['name']}**")
+        lines.append(f"现值: `{curr_val:.4f}`")
+        lines.append(f"状态: {status_text}") # 输出量化描述
+        lines.append("") # 空一行增加可读性
 
-    lines.append(f"\n🔗 [查看可视化报表]({url})")
+    lines.append(f"🔗 [查看可视化报表]({url})")
     
     requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage", 
                   json={"chat_id": TG_CHAT_ID, "text": "\n".join(lines), "parse_mode": "Markdown"})
