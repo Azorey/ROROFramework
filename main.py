@@ -15,7 +15,7 @@ INDICATORS = [
         "numerator": "XLY",
         "denominator": "XLP",
         "description": "Risk On/Off 核心指标"
-    }
+    },
     {
         "name": "经济扩张/避险 (XLI/XLU)",
         "numerator": "XLI",
