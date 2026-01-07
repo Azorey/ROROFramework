@@ -16,6 +16,12 @@ INDICATORS = [
         "denominator": "XLP",
         "description": "Risk On/Off 核心指标"
     }
+    {
+        "name": "经济扩张/避险 (XLI/XLU)",
+        "numerator": "XLI",
+        "denominator": "XLU",
+        "description": "上升代表经济扩张预期，下降代表避险情绪"
+    }
 ]
 
 # 2. 板块配置
