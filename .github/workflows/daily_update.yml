@@ -2,8 +2,10 @@ name: Daily Market Indicators
 
 on:
   schedule:
-    # 每天 UTC 22:00 (美东时间下午 5:00 或 6:00) 运行
-    - cron: '0 22 * * 1-5' 
+    # UTC时间 21:00 对应美东时间下午 4:00 (收盘)
+    # 建议设在 21:30 (冬令时) 或 20:30 (夏令时) 以确保收盘数据已更新
+    # 这里设置为 UTC 21:15 (大约北京时间凌晨 5:15)
+    - cron: '15 21 * * 1-5'
   workflow_dispatch: # 允许手动点按钮触发测试
 
 permissions:
